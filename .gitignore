@@ -1,0 +1,17 @@
+node_modules
+dist
+.claude
+.env
+server/.env
+server/node_modules
+*-credentials.json
+*-service-account.json
+*.local
+
+# Heavy reference/sample data — not needed to build or run the app.
+# (The small .md report references in docs/ are kept.)
+docs/*.csv
+docs/*.xlsx
+docs/*.pptx
+docs/*.docx
+docs/*.pdf

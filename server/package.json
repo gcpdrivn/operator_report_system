@@ -1,0 +1,18 @@
+{
+  "name": "operator-report-proxy",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Read-only BigQuery proxy for the Operator Report Generator. SELECT-only, parameterized, reads only the dashboard_kpis MV layer.",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@fastify/compress": "^7.0.3",
+    "@fastify/cors": "^9.0.1",
+    "@google-cloud/bigquery": "^7.9.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  }
+}
