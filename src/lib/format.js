@@ -16,6 +16,7 @@ export const FORMATTERS = {
   rupeeLakh2: v => (v == null ? '—' : (Number(v) / 1e5).toFixed(2)),   // bare lakhs, 2 dp
   lakh2:      v => (v == null ? '—' : `₹${(Number(v) / 1e5).toFixed(2)}L`),
   lakhShort:  v => (v == null ? '—' : fmt(Number(v), '₹')),            // ₹15.2L / ₹1.3Cr
+  hrs2:       v => (v == null ? '—' : `${Number(v).toFixed(2)} hrs`),
   date:       v => fmtDate(v),                                          // 'YYYY-MM-DD' -> '10 Jun'
   auto:       (v, row) => (FORMATTERS[row?.format] || FORMATTERS.text)(v, row),
 }

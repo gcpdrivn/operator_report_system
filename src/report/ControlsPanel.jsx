@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import Dropdown from '../components/Dropdown.jsx'
 import DateRangePicker from '../components/DateRangePicker.jsx'
-import { REPORT_SCHEMA, tableKey } from './reportSchema.js'
+import { tableKey } from './reportSchema.js'
+import { SCHEMAS } from './schemas.js'
 import { operatorRoutes } from './defaultConfig.js'
 import { applyTokens } from '../lib/format.js'
 
 const arrow = r => String(r).replace(' -> ', ' → ')
 const sectionLabel = { groupTitle: { fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, margin: '18px 0 8px' } }
 
-export default function ControlsPanel({ meta, config, setConfig, data }) {
-  const [expanded, setExpanded] = useState(() => new Set(REPORT_SCHEMA.map(s => s.id)))
+export default function ControlsPanel({ meta, config, setConfig, data, schema }) {
+  const [expanded, setExpanded] = useState(() => new Set(Object.values(SCHEMAS).flat().map(s => s.id)))
   const [expandedCols, setExpandedCols] = useState(() => new Set())
+  const isRoute = config.reportType === 'route'
 
   const dates = meta?.window?.dates || []
   const startIdx = Math.max(0, dates.indexOf(config.from))
@@ -45,6 +47,8 @@ export default function ControlsPanel({ meta, config, setConfig, data }) {
     : operatorRoutes(meta, config.operator)
   const routeOptions = routes.map(r => ({ value: r, label: arrow(r) }))
   const operatorOptions = (meta?.operators || []).map(o => ({ value: o.name, label: o.name, meta: `${o.trips}` }))
+  // All routes in the window — the subject picker for route-level reports.
+  const allRouteOptions = (meta?.routes || []).map(r => ({ value: r.route, label: arrow(r.route), meta: `${r.trips}` }))
 
   const toggleSet = (setter, key) => setter(prev => {
     const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n
@@ -57,14 +61,27 @@ export default function ControlsPanel({ meta, config, setConfig, data }) {
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>Report Controls</div>
 
-      <div style={sectionLabel.groupTitle}>Operator</div>
-      <Dropdown value={config.operator} options={operatorOptions} onChange={setOperator} width="100%" />
+      <div style={sectionLabel.groupTitle}>Report Type</div>
+      <Segmented value={config.reportType} onChange={v => setField('reportType', v)}
+        options={[{ v: 'operator', l: 'Operator' }, { v: 'route', l: 'Route' }]} />
+
+      {isRoute ? (
+        <>
+          <div style={sectionLabel.groupTitle}>Route</div>
+          <Dropdown value={config.route} options={allRouteOptions} onChange={r => setField('route', r)} width="100%" />
+        </>
+      ) : (
+        <>
+          <div style={sectionLabel.groupTitle}>Operator</div>
+          <Dropdown value={config.operator} options={operatorOptions} onChange={setOperator} width="100%" />
+        </>
+      )}
 
       <div style={{ marginTop: 16 }}>
         <DateRangePicker dates={dates} startIdx={startIdx} endIdx={endIdx} setStartIdx={setStartIdx} setEndIdx={setEndIdx} />
       </div>
 
-      {competitiveOn && (
+      {!isRoute && competitiveOn && (
         <>
           <div style={sectionLabel.groupTitle}>Competitive Routes (top-operator tables)</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -76,7 +93,7 @@ export default function ControlsPanel({ meta, config, setConfig, data }) {
         </>
       )}
 
-      {(config.sections.crossOperator || config.sections.suggested) && (
+      {!isRoute && (config.sections.crossOperator || config.sections.suggested) && (
         <>
           <div style={sectionLabel.groupTitle}>Comparison Operators (§6 / §7)</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -92,7 +109,7 @@ export default function ControlsPanel({ meta, config, setConfig, data }) {
         </>
       )}
 
-      {config.sections.suggested && config.tables[tableKey('suggested', 'topRoutes')] !== false && (
+      {!isRoute && config.sections.suggested && config.tables[tableKey('suggested', 'topRoutes')] !== false && (
         <>
           <div style={sectionLabel.groupTitle}>Suggested Routes — Ranking Criteria</div>
           <Segmented value={config.suggestedCriteria} onChange={v => setField('suggestedCriteria', v)}
@@ -105,7 +122,7 @@ export default function ControlsPanel({ meta, config, setConfig, data }) {
 
       <div style={sectionLabel.groupTitle}>Sections · Tables · Columns</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {REPORT_SCHEMA.map(section => {
+        {schema.map(section => {
           const tableKeys = section.tables.map(t => tableKey(section.id, t.id))
           const onCount = tableKeys.filter(k => config.tables[k] !== false).length
           const secOn = config.sections[section.id] !== false

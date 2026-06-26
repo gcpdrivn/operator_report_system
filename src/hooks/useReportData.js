@@ -29,19 +29,23 @@ export function useReportMeta() {
   return state
 }
 
-// Report payload for the selected operator + date range. Re-fetches when those
-// change (toggles are pure client-side and never re-fetch).
-export function useReportData({ operator, from, to }) {
+// Report payload for the selected subject (operator or route) + date range.
+// Re-fetches when type/operator/route/dates change (toggles are client-side).
+export function useReportData({ type = 'operator', operator, route, from, to }) {
   const [state, setState] = useState({ data: null, loading: false, error: null, fromCache: false, lastUpdated: null })
   const inFlight = useRef(false)
 
+  const subject = type === 'route' ? route : operator
+
   const load = useCallback(async ({ force = false } = {}) => {
-    if (!operator || !from || !to) return
+    if (!subject || !from || !to) return
     if (inFlight.current) return
     inFlight.current = true
     setState(s => ({ ...s, loading: true, error: null }))
     try {
-      const qs = new URLSearchParams({ operator, from, to })
+      const qs = new URLSearchParams({ from, to })
+      if (type === 'route') { qs.set('type', 'route'); qs.set('route', route) }
+      else { qs.set('operator', operator) }
       if (force) qs.set('refresh', '1')
       const res = await fetch(`${API_BASE}/api/report?${qs.toString()}`)
       if (!res.ok) {
@@ -61,7 +65,7 @@ export function useReportData({ operator, from, to }) {
     } finally {
       inFlight.current = false
     }
-  }, [operator, from, to])
+  }, [type, operator, route, from, to, subject])
 
   useEffect(() => { load() }, [load])
 

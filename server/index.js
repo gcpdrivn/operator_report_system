@@ -17,7 +17,7 @@ if (credPath && !isAbsolute(credPath)) {
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import compress from '@fastify/compress'
-import { getMeta, getReport } from './report.js'
+import { getMeta, getReport, getRouteReport } from './report.js'
 
 const PORT = Number(process.env.PORT || 8788)
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 10 * 60 * 1000)
@@ -51,11 +51,10 @@ async function getMetaCached({ force = false } = {}) {
   return { meta: await metaInFlight, fromCache: false }
 }
 
-// ---- Report cache (keyed by operator|from|to), with per-key coalescing ----
+// ---- Report cache (keyed string), with per-key coalescing ----
 const reportCache = new Map()    // key -> { payload, ts }
 const reportInFlight = new Map() // key -> Promise
-async function getReportCached(args, { force = false } = {}) {
-  const key = `${args.operator}|${args.from}|${args.to}`
+async function cachedReport(key, build, { force = false } = {}) {
   const hit = reportCache.get(key)
   if (!force && hit && Date.now() - hit.ts < CACHE_TTL_MS) {
     return { payload: hit.payload, fromCache: true }
@@ -64,7 +63,7 @@ async function getReportCached(args, { force = false } = {}) {
   const p = (async () => {
     try {
       const t0 = Date.now()
-      const payload = await getReport(args)
+      const payload = await build()
       payload.meta = { ...payload.meta, queryMs: Date.now() - t0 }
       reportCache.set(key, { payload, ts: Date.now() })
       return payload
@@ -93,15 +92,28 @@ app.get('/api/report/meta', async (req, reply) => {
 })
 
 app.get('/api/report', async (req, reply) => {
-  const operator = (req.query?.operator || '').trim()
+  const type = (req.query?.type || 'operator').trim()
   let from = (req.query?.from || '').trim()
   let to = (req.query?.to || '').trim()
 
-  if (!operator) { reply.code(400); return { error: 'operator is required' } }
   if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
     reply.code(400); return { error: 'from and to must be YYYY-MM-DD dates' }
   }
   if (from > to) { reply.code(400); return { error: 'from must be on or before to' } }
+
+  // Build the subject + cache key + builder for the requested report type.
+  let key, build
+  if (type === 'route') {
+    const route = (req.query?.route || '').trim()
+    if (!route) { reply.code(400); return { error: 'route is required' } }
+    key = `route|${route}`
+    build = (f, t) => getRouteReport({ route, from: f, to: t })
+  } else {
+    const operator = (req.query?.operator || '').trim()
+    if (!operator) { reply.code(400); return { error: 'operator is required' } }
+    key = `op|${operator}`
+    build = (f, t) => getReport({ operator, from: f, to: t })
+  }
 
   try {
     // Clamp the requested range to the loaded MV window so a request can't
@@ -114,8 +126,9 @@ app.get('/api/report', async (req, reply) => {
       if (w.end && to > w.end) { to = w.end; clamped = true }
     } catch { /* if meta fails, proceed with validated dates */ }
 
-    const { payload, fromCache } = await getReportCached(
-      { operator, from, to },
+    const { payload, fromCache } = await cachedReport(
+      `${key}|${from}|${to}`,
+      () => build(from, to),
       { force: req.query?.refresh === '1' }
     )
     if (clamped) payload.meta = { ...payload.meta, clamped: true }

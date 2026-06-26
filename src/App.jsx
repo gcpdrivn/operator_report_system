@@ -4,6 +4,7 @@ import ControlsPanel from './report/ControlsPanel.jsx'
 import ReportPreview from './report/ReportPreview.jsx'
 import { useReportMeta, useReportData } from './hooks/useReportData.js'
 import { buildDefaultConfig } from './report/defaultConfig.js'
+import { schemaFor } from './report/schemas.js'
 import { exportPdf } from './report/export/exportPdf.js'
 import { exportXlsx } from './report/export/exportXlsx.js'
 
@@ -20,25 +21,32 @@ export default function App() {
     const base = buildDefaultConfig(meta)
     const p = new URLSearchParams(window.location.search)
     const op = p.get('operator')
+    const route = p.get('route')
+    const type = p.get('type')
     const from = p.get('from')
     const to = p.get('to')
     const dates = meta.window?.dates || []
+    if (type === 'route') base.reportType = 'route'
     if (op && meta.operators?.some(o => o.name === op)) base.operator = op
+    if (route && meta.routes?.some(r => r.route === route)) base.route = route
     if (from && dates.includes(from)) base.from = from
     if (to && dates.includes(to)) base.to = to
     setConfig(base)
   }, [meta, config])
 
   const { data, loading, error, fromCache, refresh } = useReportData({
-    operator: config?.operator, from: config?.from, to: config?.to,
+    type: config?.reportType, operator: config?.operator, route: config?.route,
+    from: config?.from, to: config?.to,
   })
 
-  // Once a report loads, seed the competitive routes (top 2 of the operator's
-  // in-range routes) and comparison operators (top 2 by trips) — once per
-  // operator. The user can change them freely afterward.
+  const schema = schemaFor(config?.reportType)
+
+  // Once an OPERATOR report loads, seed the competitive routes (top 2 of the
+  // operator's in-range routes) and comparison operators (top 2 by trips) —
+  // once per operator. The user can change them freely afterward.
   const initFor = useRef(null)
   useEffect(() => {
-    if (!config || !data) return
+    if (!config || config.reportType !== 'operator' || !data) return
     if (data.operator !== config.operator) return        // ignore stale data from a previous operator
     if (initFor.current === config.operator) return
     initFor.current = config.operator
@@ -48,8 +56,11 @@ export default function App() {
   }, [data, config])
 
   const ready = !!(config && data)
-  const handlePdf = () => exportPdf(`Operator_Report_${config?.operator}_${config?.from}_${config?.to}`)
-  const handleXlsx = () => { if (ready) exportXlsx(config, data) }
+  const subject = config?.reportType === 'route' ? config?.route : config?.operator
+  const fnameBase = `${config?.reportType === 'route' ? 'Route' : 'Operator'}_Report_${subject}_${config?.from}_${config?.to}`
+    .replace(/[\\/:*?"<>|]/g, '-')
+  const handlePdf = () => exportPdf(fnameBase)
+  const handleXlsx = () => { if (ready) exportXlsx(config, data, schema) }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -79,12 +90,12 @@ export default function App() {
         }}>
           {metaLoading && <Muted>Loading operators…</Muted>}
           {metaError && <Err>{metaError}</Err>}
-          {config && meta && <ControlsPanel meta={meta} config={config} setConfig={setConfig} data={data} />}
+          {config && meta && <ControlsPanel meta={meta} config={config} setConfig={setConfig} data={data} schema={schema} />}
         </aside>
 
         <main className="preview" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 24, background: 'var(--bg)' }}>
           {config
-            ? <ReportPreview data={data} config={config} loading={loading} error={error} />
+            ? <ReportPreview data={data} config={config} schema={schema} loading={loading} error={error} />
             : <Muted>Initializing…</Muted>}
         </main>
       </div>

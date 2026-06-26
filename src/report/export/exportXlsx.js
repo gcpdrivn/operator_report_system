@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { REPORT_SCHEMA, tableKey } from '../reportSchema.js'
+import { tableKey } from '../reportSchema.js'
 import { FORMATTERS, applyTokens } from '../../lib/format.js'
 import { getByPath } from '../../lib/path.js'
 import { crossOperatorView, suggestedView } from '../views.js'
@@ -7,11 +7,11 @@ import { crossOperatorView, suggestedView } from '../views.js'
 // One worksheet per enabled section; tables stack vertically with a title row,
 // a header row, then data rows. Honors section/table/column toggles and reuses
 // the same format tokens as the preview so Excel text matches the screen.
-export function exportXlsx(config, payload) {
+export function exportXlsx(config, payload, schema) {
   const wb = XLSX.utils.book_new()
   const op = payload?.operator
 
-  for (const section of REPORT_SCHEMA) {
+  for (const section of schema) {
     if (config.sections[section.id] === false) continue
     const aoa = []
 
@@ -61,6 +61,8 @@ export function exportXlsx(config, payload) {
   }
 
   const safe = s => String(s || '').replace(/[\\/:*?"<>|]/g, '-')
-  const fname = `Operator_Report_${safe(payload.operator)}_${safe(payload.meta?.from)}_${safe(payload.meta?.to)}.xlsx`
+  const kind = payload.route ? 'Route' : 'Operator'
+  const subject = payload.route || payload.operator
+  const fname = `${kind}_Report_${safe(subject)}_${safe(payload.meta?.from)}_${safe(payload.meta?.to)}.xlsx`
   XLSX.writeFile(wb, fname)
 }

@@ -1,11 +1,10 @@
 import Card from '../components/Card.jsx'
 import SectionBlock from './SectionBlock.jsx'
-import { REPORT_SCHEMA } from './reportSchema.js'
 import { fmtPeriod } from '../lib/format.js'
 
 // Right pane: the styled, customizable report. This element is the print target
-// for PDF export (id="report-root").
-export default function ReportPreview({ data, config, loading, error }) {
+// for PDF export (id="report-root"). `schema` is the active report-type schema.
+export default function ReportPreview({ data, config, schema, loading, error }) {
   if (error) {
     return (
       <Card style={{ borderColor: 'var(--red)' }}>
@@ -19,7 +18,9 @@ export default function ReportPreview({ data, config, loading, error }) {
 
   const nDays = data.meta?.nDays || 0
   const tripCount = data.meta?.tripCount || 0
-  const enabledSections = REPORT_SCHEMA.filter(s => config.sections[s.id] !== false)
+  const isRoute = config.reportType === 'route'
+  const subject = isRoute ? (data.route || '').replace(' -> ', ' → ') : data.operator
+  const enabledSections = schema.filter(s => config.sections[s.id] !== false)
 
   return (
     <div id="report-root" style={{ maxWidth: 920, margin: '0 auto' }}>
@@ -27,10 +28,10 @@ export default function ReportPreview({ data, config, loading, error }) {
       <Card className="kpi-accent" style={{ marginBottom: 24 }}>
         <div className="kpi-accent" style={{ position: 'relative', padding: '4px 0' }}>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
-            Operator Level Report
+            {isRoute ? 'Route Level Report' : 'Operator Level Report'}
           </div>
           <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 12px' }}>
-            {data.operator}
+            {subject}
           </div>
           <table className="report-table" style={{ maxWidth: 460 }}>
             <tbody>
@@ -42,9 +43,14 @@ export default function ReportPreview({ data, config, loading, error }) {
             marginTop: 14, paddingLeft: 12, borderLeft: '3px solid var(--accent)',
             fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5
           }}>
-            <strong>Scope:</strong> All figures are <strong>{data.operator}</strong>-specific unless a
-            column/row is labelled <strong>Market</strong> / <strong>Mkt</strong>, which aggregates
-            all other operators on the same route(s) {data.operator} runs.
+            {isRoute ? (
+              <><strong>Scope:</strong> All figures aggregate <strong>all operators</strong> on <strong>{subject}</strong> (the route market).
+              The Operator Landscape and EV vs ICE sections break this down by operator and fuel.</>
+            ) : (
+              <><strong>Scope:</strong> All figures are <strong>{subject}</strong>-specific unless a
+              column/row is labelled <strong>Market</strong> / <strong>Mkt</strong>, which aggregates
+              all other operators on the same route(s) {subject} runs.</>
+            )}
           </div>
         </div>
       </Card>
