@@ -10,6 +10,11 @@ export const FORMATTERS = {
   int:        v => (v == null ? '—' : inr(v)),
   dash:       v => (v == null || v === 0 ? '—' : inr(v)),       // 0 / null render as em-dash
   pct1:       v => (v == null ? '—' : `${Number(v).toFixed(1)}%`),
+  pct0:       v => (v == null ? '—' : `${Math.round(Number(v))}%`),
+  // Trips/day: whole number when it rounds to ≥1, "≤1" for a positive fraction
+  // (e.g. 1 trip over 5 days = 0.2/day) so it never reads as "0" beside real
+  // occupancy — and "≤1" (not "<1") since the slot may genuinely hold 1 trip.
+  tripsDay:   v => { if (v == null) return '—'; const n = Number(v), r = Math.round(n); return r >= 1 ? r.toLocaleString('en-IN') : (n > 0 ? '≤1' : '0') },
   share1:     v => (v == null ? '—' : `${Number(v).toFixed(1)}%`),
   rupee:      v => (v == null ? '—' : `₹${inr(v)}`),
   rupee2:     v => (v == null ? '—' : `₹${Number(v).toFixed(2)}`),     // small per-km figures

@@ -21,6 +21,9 @@ export default function ControlsPanel({ meta, config, setConfig, data, schema })
   const setOperator = (name) =>
     // Clear route/operator picks; App re-seeds them from the new operator's data.
     setConfig(c => ({ ...c, operator: name, competitiveRoutes: [], comparisonOperators: [] }))
+  // Route reports: changing the corridor resets the optional operator filter, since
+  // the operator list is route-specific.
+  const setRouteSubject = (r) => setConfig(c => ({ ...c, route: r, routeOperator: '' }))
   const setStartIdx = (i) => setConfig(c => ({ ...c, from: dates[i] || c.from }))
   const setEndIdx = (i) => setConfig(c => ({ ...c, to: dates[i] || c.to }))
   const toggleSection = (id) => setConfig(c => ({ ...c, sections: { ...c.sections, [id]: !c.sections[id] } }))
@@ -49,6 +52,11 @@ export default function ControlsPanel({ meta, config, setConfig, data, schema })
   const operatorOptions = (meta?.operators || []).map(o => ({ value: o.name, label: o.name, meta: `${o.trips}` }))
   // All routes in the window — the subject picker for route-level reports.
   const allRouteOptions = (meta?.routes || []).map(r => ({ value: r.route, label: arrow(r.route), meta: `${r.trips}` }))
+  // Operators on the selected route (from the loaded report) — the optional filter.
+  const routeOperatorOptions = [
+    { value: '', label: 'All operators (whole-route market)' },
+    ...((data?.meta?.routeOperators) || []).map(name => ({ value: name, label: name })),
+  ]
 
   const toggleSet = (setter, key) => setter(prev => {
     const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n
@@ -68,7 +76,15 @@ export default function ControlsPanel({ meta, config, setConfig, data, schema })
       {isRoute ? (
         <>
           <div style={sectionLabel.groupTitle}>Route</div>
-          <Dropdown value={config.route} options={allRouteOptions} onChange={r => setField('route', r)} width="100%" />
+          <Dropdown value={config.route} options={allRouteOptions} onChange={setRouteSubject} width="100%" />
+          <div style={sectionLabel.groupTitle}>Operator on Route</div>
+          <Dropdown value={config.routeOperator || ''} options={routeOperatorOptions}
+            onChange={v => setField('routeOperator', v)} width="100%" />
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.45 }}>
+            {config.routeOperator
+              ? <>Sections 1–4 &amp; 6 show <strong>{config.routeOperator}</strong> on {arrow(config.route)}. §5 Operator Landscape always lists all operators (this one highlighted).</>
+              : <>Whole-route market (all operators). Pick an operator to narrow sections 1–4 &amp; 6 to it.</>}
+          </div>
         </>
       ) : (
         <>
@@ -80,6 +96,15 @@ export default function ControlsPanel({ meta, config, setConfig, data, schema })
       <div style={{ marginTop: 16 }}>
         <DateRangePicker dates={dates} startIdx={startIdx} endIdx={endIdx} setStartIdx={setStartIdx} setEndIdx={setEndIdx} />
       </div>
+
+      <div style={sectionLabel.groupTitle}>Bus Class</div>
+      <Segmented value={config.busClass || ''} onChange={v => setField('busClass', v)}
+        options={[{ v: '', l: 'All' }, { v: 'seater', l: 'Seater' }, { v: 'sleeper', l: 'Sleeper' }, { v: 'hybrid', l: 'Hybrid' }]} />
+      {config.busClass && (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.45 }}>
+          Every figure covers <strong>{config.busClass}</strong> buses only ({config.busClass === 'hybrid' ? 'seater + sleeper in one bus' : `${config.busClass}-only buses`}), including the market comparison.
+        </div>
+      )}
 
       {!isRoute && competitiveOn && (
         <>

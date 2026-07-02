@@ -7,6 +7,7 @@
 export const REPORT_SCHEMA = [
   {
     id: 'exec', title: '1. Executive Summary',
+    scope: '{operator} only — all of {operator}’s trips in the period.',
     tables: [
       {
         id: 'kpi', title: 'Key Performance Indicators', kind: 'kpi', field: 'exec.kpis',
@@ -20,6 +21,7 @@ export const REPORT_SCHEMA = [
   },
   {
     id: 'fleet', title: '2. Fleet Profile',
+    scope: '{operator} only. Counts are SCHEDULED departures (catalog); overall capture rate is shown at the top of the report.',
     tables: [
       {
         id: 'composition', title: 'Fleet Composition Breakdown', kind: 'grid', field: 'fleet.composition',
@@ -41,13 +43,14 @@ export const REPORT_SCHEMA = [
           { key: 'sleeper', label: 'Sleeper', format: 'dash', align: 'right' },
           { key: 'hybrid', label: 'Hybrid', format: 'dash', align: 'right' },
           { key: 'busesDay', label: 'Buses/Day', format: 'int', align: 'right' },
-          { key: 'totalTrips', label: 'Total Trips', format: 'int', align: 'right' },
+          { key: 'totalTrips', label: 'Total Trips (scheduled)', format: 'int', align: 'right' },
         ],
       },
     ],
   },
   {
     id: 'revenue', title: '3. Revenue Dashboard',
+    scope: '{operator} only. Revenue / occupancy / ASP are computed from CAPTURED trips (overall capture rate at the top).',
     tables: [
       {
         id: 'metrics', title: 'Revenue Metrics at a Glance', kind: 'kpi', field: 'revenue.metrics',
@@ -97,9 +100,13 @@ export const REPORT_SCHEMA = [
   },
   {
     id: 'occupancy', title: '4. Occupancy Analysis',
+    scope: '{operator} only. Occupancy from CAPTURED trips; Trips/Day are SCHEDULED departures.',
     tables: [
       {
-        id: 'daily', title: 'Overall Occupancy Trend (daily)', kind: 'grid', field: 'occupancy.daily',
+        id: 'daily', title: 'Overall Occupancy Trend (daily)', kind: 'lineChart', field: 'occupancy.daily',
+        xKey: 'date',
+        series: [{ key: 'occupancy', label: 'Occupancy', format: 'pct1', color: 'var(--accent-strong)' }],
+        // columns are used for the Excel export + the column-toggle tree (the chart plots `series`).
         columns: [
           { key: 'date', label: 'Date', format: 'date', align: 'left' },
           { key: 'occupancy', label: 'Occupancy', format: 'pct1', align: 'right' },
@@ -108,16 +115,18 @@ export const REPORT_SCHEMA = [
       },
       {
         id: 'timeOfDay', title: 'Occupancy by Time of Day', kind: 'grid', field: 'occupancy.timeOfDay',
+        note: 'Scrape window ≈ 05:00–24:00 IST. Departures between midnight and 05:00 are captured only via prior-evening scrapes, so the Night / Early (00–08) slot under-represents the 00:00–05:00 hours.',
         columns: [
           { key: 'slot', label: 'Time Slot', format: 'text', align: 'left' },
           { key: 'avgOccupancy', label: 'Avg Occupancy', format: 'pct1', align: 'right' },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
         ],
       },
     ],
   },
   {
     id: 'competitive', title: '5. Competitive Benchmarking',
+    scope: '{operator} vs the Market. “Market / Mkt” = all OTHER operators on the same route(s) {operator} runs. The Top-Operators table lists the top 5 operators by frequency on each selected route (including {operator}).',
     note: 'Operator vs Market — Market = all OTHER operators on the same routes the operator runs.',
     tables: [
       {
@@ -158,7 +167,7 @@ export const REPORT_SCHEMA = [
         field: 'competitive.topOperators', dynamicByRoute: true,
         columns: [
           { key: 'operator', label: 'Operator', format: 'text', align: 'left' },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
           { key: 'occupancy', label: 'Occupancy', format: 'pct1', align: 'right' },
           { key: 'seaterAsp', label: 'Seater ASP', format: 'rupee', align: 'right' },
           { key: 'sleeperAsp', label: 'Sleeper ASP', format: 'rupee', align: 'right' },
@@ -168,6 +177,7 @@ export const REPORT_SCHEMA = [
   },
   {
     id: 'crossOperator', title: '6. Cross-Operator Comparison',
+    scope: '{operator} vs the specific comparison operators you pick — head-to-head on {operator}’s routes (NOT the whole market).',
     note: 'Across {operator}’s routes (sorted by {operator} frequency). Pick comparison operators in the controls. “Not Running” = that operator has no service on the route. Columns below toggle which metrics show for every operator.',
     tables: [
       {
@@ -183,6 +193,7 @@ export const REPORT_SCHEMA = [
   },
   {
     id: 'suggested', title: '7. Suggested Routes',
+    scope: 'WHOLE MARKET — every operator on each corridor (NOT {operator}-specific). “{operator}?” flags whether {operator} already runs it.',
     note: 'Top 10 market corridors (all operators) by the chosen criteria. Set the ranking criteria and the presence filter in the controls.',
     tables: [
       {
@@ -193,7 +204,7 @@ export const REPORT_SCHEMA = [
           { key: 'distanceKm', label: 'Distance (km)', format: 'dash', align: 'right' },
           { key: 'mktRevDay', label: 'Mkt Rev / Day (₹L)', format: 'rupeeLakh2', align: 'right' },
           { key: 'mktOcc', label: 'Mkt Occ', format: 'pct1', align: 'right' },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
           { key: 'evPct', label: 'EV Now %', format: 'pct1', align: 'right' },
           { key: 'operators', label: 'Operators', format: 'int', align: 'right', defaultOff: true },
           { key: 'subjectFlag', label: '{operator}?', format: 'text', align: 'center' },

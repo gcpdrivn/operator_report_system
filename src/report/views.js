@@ -71,7 +71,7 @@ export function suggestedView(payload, config) {
   add('distanceKm', 'Distance (km)', 'dash', 'right')
   add('mktRevDay', 'Mkt Rev / Day (₹L)', 'rupeeLakh2', 'right')
   add('mktOcc', 'Mkt Occ', 'pct1', 'right')
-  add('tripsDay', 'Trips/Day', 'int', 'right')
+  add('tripsDay', 'Trips/Day', 'tripsDay', 'right')
   add('evPct', 'EV Now %', 'pct1', 'right')
   add('operators', 'Operators', 'int', 'right')
   if (on('subjectFlag')) columns.push({ key: 'subjectFlag', label: `${subject}?`, format: 'text', align: 'center', bold: true })

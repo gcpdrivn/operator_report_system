@@ -139,6 +139,8 @@ table.report-table tr.report-subject td {
 @media print {
   header, .controls, .no-print, .dt-toolbar, .dt-pagination { display: none !important; }
   .preview { overflow: visible !important; width: 100% !important; height: auto !important; padding: 0 !important; }
+  /* Use the full page width — override the on-screen 920px reading column. */
+  #report-root { max-width: none !important; width: 100% !important; margin: 0 !important; }
   /* Force light theme regardless of the on-screen toggle */
   :root, [data-theme="dark"] {
     --bg: #ffffff; --surface: #ffffff; --surface2: #f5f8fa;
@@ -148,10 +150,26 @@ table.report-table tr.report-subject td {
     --shadow: none; --shadow-strong: none;
   }
   html, body, #root { background: #fff !important; height: auto !important; }
-  @page { size: A4 portrait; margin: 14mm; }
-  .report-section { break-inside: avoid-page; page-break-inside: avoid; }
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;  /* keep accent fills */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  /* Landscape gives ~50% more width so wide metric tables (10–14 cols) fit even
+     when the browser print dialog uses Letter paper / 100% scale / larger margins. */
+  @page { size: A4 landscape; margin: 10mm; }
+
+  /* Each section starts on a fresh page (but may break internally if very tall). */
+  .report-section { break-inside: auto; }
   .report-section + .report-section { break-before: page; page-break-before: always; }
-  table.report-table { page-break-inside: auto; }
-  table.report-table thead { display: table-header-group; }   /* repeat header each printed page */
+
+  /* Tables: full width, compact, and WRAP so wide tables never clip off-page. */
+  .rt-scroll { overflow: visible !important; }
+  table.report-table { width: 100% !important; table-layout: auto; font-size: 9px; page-break-inside: auto; }
+  table.report-table thead { display: table-header-group; }   /* repeat header on each printed page */
+  table.report-table th, table.report-table td {
+    padding: 3px 5px !important; white-space: normal !important;
+    word-break: normal; overflow-wrap: break-word;   /* wrap at spaces first; split a word only if it would overflow */
+  }
   table.report-table tr { page-break-inside: avoid; }
+
+  /* Keep KPI tiles and cards from splitting awkwardly. */
+  .report-section [style*="grid"] { break-inside: avoid; }
 }

@@ -5,7 +5,8 @@
 
 export const ROUTE_SCHEMA = [
   {
-    id: 'routeExec', title: '1. Executive Summary',
+    id: 'routeExec', title: '1. Executive Summary', operatorScoped: true,
+    scope: 'WHOLE ROUTE MARKET — all operators on this corridor combined.',
     tables: [
       {
         id: 'kpi', title: 'Key Performance Indicators', kind: 'kpi', field: 'exec.kpis',
@@ -18,7 +19,8 @@ export const ROUTE_SCHEMA = [
     ],
   },
   {
-    id: 'routeProfile', title: '2. Route Profile',
+    id: 'routeProfile', title: '2. Route Profile', operatorScoped: true,
+    scope: 'All operators on this route. Operators / Trips = SCHEDULED (catalog); Unique Buses & EV% = CAPTURED (scrape).',
     tables: [
       {
         id: 'metrics', title: 'Route Metrics', kind: 'kpi', field: 'profile.metrics',
@@ -35,7 +37,8 @@ export const ROUTE_SCHEMA = [
     ],
   },
   {
-    id: 'routeRevenue', title: '3. Revenue Dashboard',
+    id: 'routeRevenue', title: '3. Revenue Dashboard', operatorScoped: true,
+    scope: 'All operators on this route (market). Revenue / occupancy / ASP from CAPTURED trips.',
     tables: [
       {
         id: 'metrics', title: 'Revenue Metrics at a Glance', kind: 'kpi', field: 'revenue.metrics',
@@ -68,10 +71,14 @@ export const ROUTE_SCHEMA = [
     ],
   },
   {
-    id: 'routeOccupancy', title: '4. Occupancy Analysis',
+    id: 'routeOccupancy', title: '4. Occupancy Analysis', operatorScoped: true,
+    scope: 'All operators on this route (market). Occupancy from CAPTURED trips; Trips/Day are SCHEDULED.',
     tables: [
       {
-        id: 'daily', title: 'Overall Occupancy Trend (daily)', kind: 'grid', field: 'occupancy.daily',
+        id: 'daily', title: 'Overall Occupancy Trend (daily)', kind: 'lineChart', field: 'occupancy.daily',
+        xKey: 'date',
+        series: [{ key: 'occupancy', label: 'Occupancy', format: 'pct1', color: 'var(--accent-strong)' }],
+        // columns are used for the Excel export + the column-toggle tree (the chart plots `series`).
         columns: [
           { key: 'date', label: 'Date', format: 'date', align: 'left' },
           { key: 'occupancy', label: 'Occupancy', format: 'pct1', align: 'right' },
@@ -80,46 +87,53 @@ export const ROUTE_SCHEMA = [
       },
       {
         id: 'timeOfDay', title: 'Occupancy by Time of Day', kind: 'grid', field: 'occupancy.timeOfDay',
+        note: 'Scrape window ≈ 05:00–24:00 IST. Departures between midnight and 05:00 are captured only via prior-evening scrapes, so the Night / Early (00–08) slot under-represents the 00:00–05:00 hours.',
         columns: [
           { key: 'slot', label: 'Time Slot', format: 'text', align: 'left' },
           { key: 'avgOccupancy', label: 'Avg Occupancy', format: 'pct1', align: 'right' },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
         ],
       },
     ],
   },
   {
     id: 'operatorLandscape', title: '5. Operator Landscape',
-    note: 'All operators on this route, ranked by revenue (top 15). Market Share = operator revenue ÷ total route revenue.',
+    scope: 'BROKEN DOWN BY OPERATOR — the top 15 operators on this route by revenue (one row per operator).',
+    note: 'All operators on this route, ranked by revenue (top 15). Market Share = operator revenue ÷ total route revenue. Trips/Day = scheduled departures.',
     tables: [
       {
         id: 'operators', title: 'Operators on this Route', kind: 'grid', field: 'operatorLandscape.operators',
         columns: [
           { key: 'rank', label: 'Rank', format: 'int', align: 'right' },
           { key: 'operator', label: 'Operator', format: 'text', align: 'left', bold: true },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
           { key: 'occupancy', label: 'Occupancy', format: 'pct1', align: 'right' },
           { key: 'seaterAsp', label: 'Seater ASP', format: 'rupee', align: 'right' },
           { key: 'sleeperAsp', label: 'Sleeper ASP', format: 'rupee', align: 'right' },
           { key: 'revDay', label: 'Revenue / Day', format: 'lakhShort', align: 'right' },
           { key: 'share', label: 'Market Share', format: 'share1', align: 'right' },
+          { key: 'revPerKm', label: 'Rev / Km', format: 'rupee', align: 'right' },
+          { key: 'revPerSeatKm', label: 'Rev / Seat / Km', format: 'rupee2', align: 'right' },
+          { key: 'revPerSeaterKm', label: 'Rev / Seater / Km', format: 'rupee2', align: 'right' },
+          { key: 'revPerSleeperKm', label: 'Rev / Sleeper / Km', format: 'rupee2', align: 'right' },
         ],
       },
     ],
   },
   {
-    id: 'evIce', title: '6. EV vs ICE',
+    id: 'evIce', title: '6. EV vs ICE', operatorScoped: true,
+    scope: 'All operators on this route, split by fuel (EV vs ICE). Counts are CAPTURED here (catalog has no fuel flag).',
     note: 'Electric vs internal-combustion fleets on this route. Trips/Day here is from captured (API) data — the catalog schedule carries no fuel flag, so the EV/ICE split can only come from the scrape.',
     tables: [
       {
         id: 'comparison', title: 'EV vs ICE — Unit Economics', kind: 'grid', field: 'evIce.comparison',
         columns: [
           { key: 'fuel', label: 'Fuel', format: 'text', align: 'left', bold: true },
-          { key: 'tripsDay', label: 'Trips/Day', format: 'int', align: 'right' },
+          { key: 'tripsDay', label: 'Trips/Day', format: 'tripsDay', align: 'right' },
           { key: 'occupancy', label: 'Occupancy', format: 'pct1', align: 'right' },
           { key: 'seaterAsp', label: 'Seater ASP', format: 'rupee', align: 'right' },
           { key: 'sleeperAsp', label: 'Sleeper ASP', format: 'rupee', align: 'right' },
-          { key: 'revDay', label: 'Revenue / Day', format: 'lakhShort', align: 'right' },
+          { key: 'revPerTrip', label: 'Revenue / Trip', format: 'rupee', align: 'right' },
           { key: 'revPerKm', label: 'Revenue / Km', format: 'rupee', align: 'right' },
           { key: 'revPerSeaterKm', label: 'Rev / Seater / Km', format: 'rupee2', align: 'right', defaultOff: true },
           { key: 'revPerSleeperKm', label: 'Rev / Sleeper / Km', format: 'rupee2', align: 'right', defaultOff: true },

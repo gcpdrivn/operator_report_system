@@ -3,6 +3,7 @@ import { FORMATTERS, applyTokens } from '../lib/format.js'
 import { getByPath } from '../lib/path.js'
 import { tableKey } from './reportSchema.js'
 import { crossOperatorView, suggestedView } from './views.js'
+import LineChart from './LineChart.jsx'
 
 // Renders the inner content of one schema table (the surrounding Card is added
 // by SectionBlock). Honors per-column toggles. Handles three kinds:
@@ -12,6 +13,11 @@ import { crossOperatorView, suggestedView } from './views.js'
 export default function ReportTable({ table, sectionId, payload, config }) {
   const key = tableKey(sectionId, table.id)
   const op = payload?.operator
+
+  // Line chart (e.g. daily occupancy trend) instead of a table.
+  if (table.kind === 'lineChart') {
+    return <LineChart rows={getByPath(payload, table.field)} xKey={table.xKey} series={table.series} />
+  }
 
   // Dynamic tables: columns/rows are computed (depend on chosen comparison
   // operators / criteria), so they come from a view-builder, not the schema.
@@ -77,7 +83,7 @@ export default function ReportTable({ table, sectionId, payload, config }) {
 function Grid({ columns, rows }) {
   if (!rows || rows.length === 0) return <Empty>No rows.</Empty>
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div className="rt-scroll" style={{ overflowX: 'auto' }}>
       <table className="report-table">
         <thead>
           <tr>

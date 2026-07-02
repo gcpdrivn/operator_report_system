@@ -101,18 +101,21 @@ app.get('/api/report', async (req, reply) => {
   }
   if (from > to) { reply.code(400); return { error: 'from must be on or before to' } }
 
+  const busClass = (req.query?.busClass || '').trim()          // optional: '' | seater | sleeper | hybrid
+
   // Build the subject + cache key + builder for the requested report type.
   let key, build
   if (type === 'route') {
     const route = (req.query?.route || '').trim()
     if (!route) { reply.code(400); return { error: 'route is required' } }
-    key = `route|${route}`
-    build = (f, t) => getRouteReport({ route, from: f, to: t })
+    const routeOperator = (req.query?.operator || '').trim()   // optional: narrow to one operator on the route
+    key = `route|${route}|${routeOperator}|${busClass}`
+    build = (f, t) => getRouteReport({ route, from: f, to: t, operator: routeOperator, busClass })
   } else {
     const operator = (req.query?.operator || '').trim()
     if (!operator) { reply.code(400); return { error: 'operator is required' } }
-    key = `op|${operator}`
-    build = (f, t) => getReport({ operator, from: f, to: t })
+    key = `op|${operator}|${busClass}`
+    build = (f, t) => getReport({ operator, from: f, to: t, busClass })
   }
 
   try {

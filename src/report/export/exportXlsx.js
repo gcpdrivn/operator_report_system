@@ -62,7 +62,10 @@ export function exportXlsx(config, payload, schema) {
 
   const safe = s => String(s || '').replace(/[\\/:*?"<>|]/g, '-')
   const kind = payload.route ? 'Route' : 'Operator'
-  const subject = payload.route || payload.operator
-  const fname = `${kind}_Report_${safe(subject)}_${safe(payload.meta?.from)}_${safe(payload.meta?.to)}.xlsx`
+  const subject = payload.route
+    ? `${payload.route}${payload.routeOperator ? ` - ${payload.routeOperator}` : ''}`
+    : payload.operator
+  const classTag = payload.busClass ? `_${payload.busClass}` : ''
+  const fname = `${kind}_Report_${safe(subject)}${classTag}_${safe(payload.meta?.from)}_${safe(payload.meta?.to)}.xlsx`
   XLSX.writeFile(wb, fname)
 }

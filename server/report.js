@@ -61,6 +61,10 @@ const OP = 'canon_operator = @operator AND travel_date BETWEEN DATE(@from) AND D
 const RANGE = 'travel_date BETWEEN DATE(@from) AND DATE(@to)'
 const TYPES = { operator: 'STRING', from: 'STRING', to: 'STRING' }
 
+// Optional bus-class filter (both report types). '' = all bus types.
+const CLASSES = new Set(['seater', 'sleeper', 'hybrid'])
+const normClass = (v) => (CLASSES.has((v || '').trim()) ? (v || '').trim() : '')
+
 // Time-of-day slot from dep_hour — shared by api and catalog (both have dep_hour).
 const SLOT_CASE = `CASE
   WHEN dep_hour>=0 AND dep_hour<8 THEN 'night'
@@ -137,9 +141,16 @@ export async function getMeta() {
 
 // ---------------- Full report ----------------
 
-export async function getReport({ operator, from, to }) {
-  const params = { operator, from, to }
-  const q = (sql) => runSelect(sql, params, TYPES)
+export async function getReport({ operator, from, to, busClass }) {
+  const cls = normClass(busClass)                 // '' = all bus types
+  const clsPred = cls ? ' AND bus_class = @busClass' : ''
+  // Shadow the module-level scope strings so the optional bus-class filter narrows
+  // BOTH the operator's own figures and the market comparison (apples-to-apples).
+  const OP = `canon_operator = @operator AND travel_date BETWEEN DATE(@from) AND DATE(@to)${clsPred}`
+  const RANGE = `travel_date BETWEEN DATE(@from) AND DATE(@to)${clsPred}`
+  const params = cls ? { operator, from, to, busClass: cls } : { operator, from, to }
+  const types = cls ? { ...TYPES, busClass: 'STRING' } : TYPES
+  const q = (sql) => runSelect(sql, params, types)
 
   const ndCTE = `nd AS (SELECT COUNT(DISTINCT travel_date) AS n FROM t WHERE ${OP})`
   const opRoutesCTE = `op_routes AS (SELECT DISTINCT route FROM t WHERE ${OP})`
@@ -152,7 +163,8 @@ export async function getReport({ operator, from, to }) {
         ROUND(AVG(occupancy_pct),1) AS avg_occ,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
         ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS overall_asp,
-        (SELECT COUNT(*) FROM ${CAT} WHERE ${OP}) AS trip_count
+        (SELECT COUNT(*) FROM ${CAT} WHERE ${OP}) AS trip_count,
+        COUNT(*) AS captured_count
       FROM t WHERE ${OP}`,
 
     // Fleet counts (buses/day, routes) from the catalog (scheduled).
@@ -165,20 +177,24 @@ export async function getReport({ operator, from, to }) {
       FROM ${CAT} WHERE ${OP} AND bus_class IN ('seater','sleeper','hybrid')
       GROUP BY bus_class`,
 
-    matrix: `WITH nd AS (SELECT COUNT(DISTINCT travel_date) AS n FROM ${CAT} WHERE ${OP}),
+    matrix: `WITH t AS (${BASE}),
+      nd AS (SELECT COUNT(DISTINCT travel_date) AS n FROM ${CAT} WHERE ${OP}),
       agg AS (SELECT route, ANY_VALUE(src) AS src, ANY_VALUE(dst) AS dst,
         COUNTIF(bus_class='seater') AS seater_trips,
         COUNTIF(bus_class='sleeper') AS sleeper_trips,
         COUNTIF(bus_class='hybrid') AS hybrid_trips,
         COUNT(*) AS total_trips
-        FROM ${CAT} WHERE ${OP} GROUP BY route)
-      SELECT route, src, dst,
-        ROUND(seater_trips/NULLIF((SELECT n FROM nd),0)) AS seater_per_day,
-        ROUND(sleeper_trips/NULLIF((SELECT n FROM nd),0)) AS sleeper_per_day,
-        ROUND(hybrid_trips/NULLIF((SELECT n FROM nd),0)) AS hybrid_per_day,
-        ROUND(total_trips/NULLIF((SELECT n FROM nd),0)) AS buses_per_day,
-        total_trips
-      FROM agg ORDER BY total_trips DESC`,
+        FROM ${CAT} WHERE ${OP} GROUP BY route),
+      cap AS (SELECT route, COUNT(*) AS captured FROM t WHERE ${OP} GROUP BY route)
+      SELECT agg.route, agg.src, agg.dst,
+        ROUND(agg.seater_trips/NULLIF((SELECT n FROM nd),0)) AS seater_per_day,
+        ROUND(agg.sleeper_trips/NULLIF((SELECT n FROM nd),0)) AS sleeper_per_day,
+        ROUND(agg.hybrid_trips/NULLIF((SELECT n FROM nd),0)) AS hybrid_per_day,
+        ROUND(agg.total_trips/NULLIF((SELECT n FROM nd),0)) AS buses_per_day,
+        agg.total_trips,
+        IFNULL(cap.captured,0) AS captured,
+        ROUND(100*IFNULL(cap.captured,0)/NULLIF(agg.total_trips,0)) AS coverage_pct
+      FROM agg LEFT JOIN cap USING (route) ORDER BY agg.total_trips DESC`,
 
     revMetrics: `WITH t AS (${BASE})
       SELECT ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
@@ -203,9 +219,11 @@ export async function getReport({ operator, from, to }) {
       SELECT 'Sleeper', ROUND(100*slr/NULLIF(sr+slr,0),1),
         ROUND(slr/NULLIF((SELECT n FROM nd),0)), ROUND(slr) FROM s`,
 
-    bestRoutes: `WITH t AS (${BASE})
-      SELECT route,
+    bestRoutes: `WITH t AS (${BASE}),
+      sched AS (SELECT route, COUNT(*) AS scheduled FROM ${CAT} WHERE ${OP} GROUP BY route),
+      api AS (SELECT route,
         CAST(ROUND(ANY_VALUE(distance_km)) AS INT64) AS distance_km,
+        COUNT(*) AS captured,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0)) AS revenue_per_trip,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0), NULLIF(ANY_VALUE(distance_km),0))) AS revenue_per_km,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr), SUM(distance_km*total_seats)),2) AS rev_per_seat_km,
@@ -213,9 +231,15 @@ export async function getReport({ operator, from, to }) {
         ROUND(SAFE_DIVIDE(SUM(booked_sleeper_revenue), SUM(distance_km*(IFNULL(sleeper_booked,0)+IFNULL(sleeper_available,0)))),2) AS rev_per_sleeper_km,
         ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS avg_seater_price,
         ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS avg_sleeper_price,
-        ROUND(AVG(occupancy_pct),1) AS occ_pct,
-        ROW_NUMBER() OVER (ORDER BY SUM(booked_revenue_inr)/NULLIF(COUNT(*),0) DESC) AS rank
-      FROM t WHERE ${OP} GROUP BY route ORDER BY revenue_per_trip DESC`,
+        ROUND(AVG(occupancy_pct),1) AS occ_pct
+        FROM t WHERE ${OP} GROUP BY route)
+      SELECT api.route, api.distance_km, api.revenue_per_trip, api.revenue_per_km,
+        api.rev_per_seat_km, api.rev_per_seater_km, api.rev_per_sleeper_km,
+        api.avg_seater_price, api.avg_sleeper_price, api.occ_pct,
+        api.captured, IFNULL(sched.scheduled, api.captured) AS scheduled,
+        ROUND(100*api.captured/NULLIF(sched.scheduled,0)) AS coverage_pct,
+        ROW_NUMBER() OVER (ORDER BY api.revenue_per_trip DESC) AS rank
+      FROM api LEFT JOIN sched USING (route) ORDER BY api.revenue_per_trip DESC`,
 
     daily: `WITH t AS (${BASE})
       SELECT FORMAT_DATE('%Y-%m-%d', travel_date) AS date,
@@ -335,15 +359,19 @@ export async function getReport({ operator, from, to }) {
 
   const e = exec[0] || {}
   const nDays = num(e.n_days) || 0
-  const tripCount = num(e.trip_count) || 0
+  const tripCount = num(e.trip_count) || 0           // scheduled departures (catalog)
+  const captured = num(e.captured_count) || 0        // captured trips (api scrape)
+  const coveragePct = tripCount ? Math.round(100 * captured / tripCount) : null
   const revPerDay = num(e.rev_per_day) || 0
   const avgOcc = num(e.avg_occ) || 0
 
   return {
     // meta.routes = the operator's routes that actually have trips in this range
     // (ordered by trips desc), used to populate/seed the competitive route picker.
-    meta: { operator, from, to, nDays, tripCount, routes: matrix.map(r => r.route), generatedAt: new Date().toISOString() },
+    meta: { operator, from, to, nDays, tripCount, tripsScheduled: tripCount, tripsCaptured: captured, coveragePct,
+            routes: matrix.map(r => r.route), generatedAt: new Date().toISOString() },
     operator,
+    busClass: cls || null,             // active bus-class filter, or null for all bus types
     exec: {
       kpis: { avgOccPct: avgOcc, avgRevDay: revPerDay, overallAsp: num(e.overall_asp) }
     },
@@ -356,17 +384,32 @@ export async function getReport({ operator, from, to }) {
   }
 }
 
-// trips/day from a raw catalog trip count and the period's distinct dates.
-function perDay(trips, nDays) { return nDays ? Math.round((num(trips) || 0) / nDays) : 0 }
+// trips/day = raw catalog trip count ÷ distinct dates. Returned UNROUNDED so the
+// frontend's `tripsDay` formatter can show "<1" for sparse slots/operators
+// instead of a misleading "0" next to real occupancy.
+function perDay(trips, nDays) { return nDays ? (num(trips) || 0) / nDays : 0 }
 
 // ---------------- Route-level report ----------------
 
-export async function getRouteReport({ route, from, to }) {
-  const params = { route, from, to }
-  const RTYPES = { route: 'STRING', from: 'STRING', to: 'STRING' }
-  const q = (sql) => runSelect(sql, params, RTYPES)
-  const RSCOPE = 'route = @route AND travel_date BETWEEN DATE(@from) AND DATE(@to)'
+export async function getRouteReport({ route, from, to, operator, busClass }) {
+  const op = (operator || '').trim()   // optional: narrow the report to one operator on the route
+  const cls = normClass(busClass)      // optional bus-class filter; '' = all bus types
+  const clsPred = cls ? ' AND bus_class = @busClass' : ''
+  const baseParams = { route, from, to, ...(cls ? { busClass: cls } : {}) }
+  const baseTypes = { route: 'STRING', from: 'STRING', to: 'STRING', ...(cls ? { busClass: 'STRING' } : {}) }
+  const opParams = op ? { ...baseParams, operator: op } : baseParams
+  const opTypes = op ? { ...baseTypes, operator: 'STRING' } : baseTypes
+  // qMarket → the whole route (all operators). qScoped → narrowed to the selected
+  // operator when one is chosen; identical to qMarket when none is. The two runners
+  // keep the @operator param off queries that don't reference it (BQ rejects unused params).
+  const qMarket = (sql) => runSelect(sql, baseParams, baseTypes)
+  const qScoped = (sql) => runSelect(sql, opParams, opTypes)
+  // The bus-class predicate rides on MSCOPE, so it narrows the whole route market
+  // (landscape + operator picker + metrics) — not just the selected operator.
+  const MSCOPE = `route = @route AND travel_date BETWEEN DATE(@from) AND DATE(@to)${clsPred}`
+  const RSCOPE = op ? `${MSCOPE} AND canon_operator = @operator` : MSCOPE
   const ndCTE = `nd AS (SELECT COUNT(DISTINCT travel_date) AS n FROM t WHERE ${RSCOPE})`
+  const ndCTEm = `nd AS (SELECT COUNT(DISTINCT travel_date) AS n FROM t WHERE ${MSCOPE})`
 
   const Q = {
     // trips + operators from the catalog (scheduled); occupancy/revenue/ASP/EV%
@@ -376,6 +419,7 @@ export async function getRouteReport({ route, from, to }) {
       SELECT COUNT(DISTINCT travel_date) AS n_days,
         (SELECT COUNT(*) FROM ${CAT} WHERE ${RSCOPE}) AS trips,
         (SELECT COUNT(DISTINCT canon_operator) FROM ${CAT} WHERE ${RSCOPE}) AS operators,
+        COUNT(*) AS captured_count,
         COUNT(DISTINCT unique_bus_id) AS unique_buses,
         ROUND(AVG(occupancy_pct),1) AS avg_occ,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
@@ -424,31 +468,40 @@ export async function getRouteReport({ route, from, to }) {
       FROM occ_by_slot FULL JOIN trips_by_slot USING (slot)`,
 
     // Operator landscape: trips/day from catalog (scheduled); occupancy/ASP/
-    // revenue/share from api. Ranked by api revenue (top 15).
-    operators: `WITH t AS (${BASE}), ${ndCTE},
-      tot AS (SELECT SUM(booked_revenue_inr) AS total_rev FROM t WHERE ${RSCOPE}),
-      cat AS (SELECT canon_operator AS operator, COUNT(*) AS trips FROM ${CAT} WHERE ${RSCOPE} GROUP BY canon_operator),
-      per_op AS (SELECT canon_operator AS operator, AVG(occupancy_pct) AS occ,
+    // revenue/share from api. Ranked by api revenue (top 15). ALWAYS market-wide
+    // (all operators) so it stays the competitive context even when the report is
+    // narrowed to one operator — the selected operator is flagged for highlighting.
+    operators: `WITH t AS (${BASE}), ${ndCTEm},
+      tot AS (SELECT SUM(booked_revenue_inr) AS total_rev FROM t WHERE ${MSCOPE}),
+      cat AS (SELECT canon_operator AS operator, COUNT(*) AS trips FROM ${CAT} WHERE ${MSCOPE} GROUP BY canon_operator),
+      per_op AS (SELECT canon_operator AS operator, COUNT(*) AS captured, AVG(occupancy_pct) AS occ,
         AVG(IF(avg_seater_price>0,avg_seater_price,NULL)) AS sa,
         AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL)) AS sl,
-        SUM(booked_revenue_inr) AS period_rev
-        FROM t WHERE ${RSCOPE} GROUP BY canon_operator)
+        SUM(booked_revenue_inr) AS period_rev,
+        ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0), NULLIF(ANY_VALUE(distance_km),0))) AS rev_per_km,
+        ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr), SUM(distance_km*total_seats)),2) AS rev_per_seat_km,
+        ROUND(SAFE_DIVIDE(SUM(booked_seater_revenue), SUM(distance_km*(IFNULL(seater_booked,0)+IFNULL(seater_available,0)))),2) AS rev_per_seater_km,
+        ROUND(SAFE_DIVIDE(SUM(booked_sleeper_revenue), SUM(distance_km*(IFNULL(sleeper_booked,0)+IFNULL(sleeper_available,0)))),2) AS rev_per_sleeper_km
+        FROM t WHERE ${MSCOPE} GROUP BY canon_operator)
       SELECT COALESCE(per_op.operator, cat.operator) AS operator,
         IFNULL(cat.trips, 0) AS trips,
+        SAFE_DIVIDE(IFNULL(cat.trips, 0), NULLIF((SELECT n FROM nd),0)) AS trips_day,
         ROUND(per_op.occ,1) AS occ_pct, ROUND(per_op.sa) AS seater_asp, ROUND(per_op.sl) AS sleeper_asp,
         ROUND(per_op.period_rev/NULLIF((SELECT n FROM nd),0)) AS revenue_per_day,
         ROUND(100*per_op.period_rev/NULLIF((SELECT total_rev FROM tot),0),1) AS share_pct,
+        per_op.rev_per_km, per_op.rev_per_seat_km, per_op.rev_per_seater_km, per_op.rev_per_sleeper_km,
+        ROUND(100*IFNULL(per_op.captured,0)/NULLIF(cat.trips,0)) AS coverage_pct,
         ROW_NUMBER() OVER (ORDER BY per_op.period_rev DESC NULLS LAST) AS rank
       FROM per_op FULL JOIN cat USING (operator)
       ORDER BY per_op.period_rev DESC NULLS LAST LIMIT 15`,
 
     evIce: `WITH t AS (${BASE}), ${ndCTE}
       SELECT IF(is_ev=TRUE,'EV','ICE') AS fuel, COUNT(*) AS cnt,
-        ROUND(COUNT(*)/NULLIF((SELECT n FROM nd),0)) AS trips_per_day,
+        COUNT(*)/NULLIF((SELECT n FROM nd),0) AS trips_per_day,
         ROUND(AVG(occupancy_pct),1) AS occ_pct,
         ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS seater_asp,
         ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS sleeper_asp,
-        ROUND(SUM(booked_revenue_inr)/NULLIF((SELECT n FROM nd),0)) AS revenue_per_day,
+        ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0)) AS revenue_per_trip,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0), NULLIF(ANY_VALUE(distance_km),0))) AS rev_per_km,
         ROUND(SAFE_DIVIDE(SUM(booked_seater_revenue), SUM(distance_km*(IFNULL(seater_booked,0)+IFNULL(seater_available,0)))),2) AS rev_per_seater_km,
         ROUND(SAFE_DIVIDE(SUM(booked_sleeper_revenue), SUM(distance_km*(IFNULL(sleeper_booked,0)+IFNULL(sleeper_available,0)))),2) AS rev_per_sleeper_km
@@ -464,17 +517,27 @@ export async function getRouteReport({ route, from, to }) {
 
     evIceFleet: `WITH t AS (${BASE})
       SELECT bus_type, COUNTIF(is_ev=TRUE) AS ev_cnt, COUNTIF(is_ev=FALSE) AS ice_cnt, COUNT(*) AS total
-      FROM t WHERE ${RSCOPE} GROUP BY bus_type ORDER BY total DESC LIMIT 10`
+      FROM t WHERE ${RSCOPE} GROUP BY bus_type ORDER BY total DESC LIMIT 10`,
+
+    // Every operator scheduled on this route (catalog), busiest first — populates
+    // the route report's optional operator filter. Always market-wide.
+    routeOperators: `SELECT canon_operator AS operator, COUNT(*) AS trips
+      FROM ${CAT} WHERE ${MSCOPE} GROUP BY canon_operator ORDER BY trips DESC`
   }
 
-  const [rExec, rRev, rUnit, rSplit, rDaily, rTime, rOps, rEv, rEvDaily, rEvFleet] = await Promise.all([
-    q(Q.exec), q(Q.revMetrics), q(Q.unit), q(Q.split), q(Q.daily), q(Q.timeOfDay),
-    q(Q.operators), q(Q.evIce), q(Q.evIceDaily), q(Q.evIceFleet)
+  const [rExec, rRev, rUnit, rSplit, rDaily, rTime, rEv, rEvDaily, rEvFleet, rOps, rOpsList] = await Promise.all([
+    // metric sections — narrowed to the selected operator when one is chosen
+    qScoped(Q.exec), qScoped(Q.revMetrics), qScoped(Q.unit), qScoped(Q.split), qScoped(Q.daily), qScoped(Q.timeOfDay),
+    qScoped(Q.evIce), qScoped(Q.evIceDaily), qScoped(Q.evIceFleet),
+    // always market-wide: the competitive landscape + the operator picker list
+    qMarket(Q.operators), qMarket(Q.routeOperators)
   ])
 
   const e = rExec[0] || {}
   const nDays = num(e.n_days) || 0
-  const tripCount = num(e.trips) || 0
+  const tripCount = num(e.trips) || 0                // scheduled departures (catalog)
+  const captured = num(e.captured_count) || 0        // captured trips (api scrape)
+  const coveragePct = tripCount ? Math.round(100 * captured / tripCount) : null
   const revPerDay = num(e.rev_per_day) || 0
   const avgOcc = num(e.avg_occ) || 0
   const m = rRev[0] || {}
@@ -483,14 +546,21 @@ export async function getRouteReport({ route, from, to }) {
   const evCnt = num(evByFuel.EV?.cnt) || 0
   const iceCnt = num(evByFuel.ICE?.cnt) || 0
   const evPenetration = (evCnt + iceCnt) ? Math.round(1000 * evCnt / (evCnt + iceCnt)) / 10 : 0
+  // All operators on the route (busiest first) — drives the picker; length = the
+  // corridor's total operator count (a route property, unchanged by the filter).
+  const routeOperators = rOpsList.map(r => r.operator)
+  const totalRouteOperators = routeOperators.length || num(e.operators) || 0
 
   return {
-    meta: { route, from, to, nDays, tripCount, generatedAt: new Date().toISOString() },
+    meta: { route, from, to, nDays, tripCount, tripsScheduled: tripCount, tripsCaptured: captured, coveragePct,
+            routeOperators, generatedAt: new Date().toISOString() },
     route,
+    routeOperator: op || null,          // the selected operator, or null for the whole-route market view
+    busClass: cls || null,              // active bus-class filter, or null for all bus types
     exec: { kpis: { avgOccPct: avgOcc, avgRevDay: revPerDay, overallAsp: num(e.overall_asp) } },
     profile: {
       metrics: {
-        distanceKm: num(e.km), operators: num(e.operators) || 0, uniqueBuses: num(e.unique_buses) || 0,
+        distanceKm: num(e.km), operators: totalRouteOperators, uniqueBuses: num(e.unique_buses) || 0,
         tripsPerDay: nDays ? Math.round(tripCount / nDays) : 0,
         avgTripDuration: num(e.avg_dur), evPenetration: num(e.ev_pct),
         projMonthly: Math.round(revPerDay * 30)
@@ -507,17 +577,21 @@ export async function getRouteReport({ route, from, to }) {
     occupancy: buildOccupancy(rDaily, rTime, avgOcc, revPerDay, nDays),
     operatorLandscape: {
       operators: rOps.map(r => ({
-        rank: num(r.rank), operator: r.operator, tripsDay: perDay(r.trips, nDays),
+        rank: num(r.rank), operator: r.operator, tripsDay: num(r.trips_day),
         occupancy: num(r.occ_pct), seaterAsp: num(r.seater_asp), sleeperAsp: num(r.sleeper_asp),
-        revDay: num(r.revenue_per_day) || 0, share: num(r.share_pct) || 0
+        revDay: num(r.revenue_per_day) || 0, share: num(r.share_pct) || 0,
+        revPerKm: num(r.rev_per_km), revPerSeatKm: num(r.rev_per_seat_km),
+        revPerSeaterKm: num(r.rev_per_seater_km), revPerSleeperKm: num(r.rev_per_sleeper_km),
+        coveragePct: num(r.coverage_pct),
+        isSubject: !!op && r.operator === op       // highlight the selected operator's row
       })),
-      totalOperators: num(e.operators) || 0
+      totalOperators: totalRouteOperators
     },
     evIce: {
       evPenetration,
       comparison: rEv.map(r => ({
-        fuel: r.fuel, tripsDay: num(r.trips_per_day) || 0, occupancy: num(r.occ_pct),
-        seaterAsp: num(r.seater_asp), sleeperAsp: num(r.sleeper_asp), revDay: num(r.revenue_per_day) || 0,
+        fuel: r.fuel, tripsDay: num(r.trips_per_day), occupancy: num(r.occ_pct),
+        seaterAsp: num(r.seater_asp), sleeperAsp: num(r.sleeper_asp), revPerTrip: num(r.revenue_per_trip),
         revPerKm: num(r.rev_per_km), revPerSeaterKm: num(r.rev_per_seater_km), revPerSleeperKm: num(r.rev_per_sleeper_km)
       })),
       daily: rEvDaily.map(r => ({ date: r.date, evRev: num(r.ev_rev) || 0, iceRev: num(r.ice_rev) || 0, evOcc: num(r.ev_occ), iceOcc: num(r.ice_occ) })),
@@ -558,14 +632,19 @@ function buildFleet(composition, matrix, nDays) {
     sleeper: num(r.sleeper_per_day) || 0,
     hybrid: num(r.hybrid_per_day) || 0,
     busesDay: num(r.buses_per_day) || 0,
-    totalTrips: num(r.total_trips) || 0
+    totalTrips: num(r.total_trips) || 0,
+    captured: num(r.captured) || 0,
+    coveragePct: num(r.coverage_pct)
   }))
+  const totalCaptured = matrix.reduce((s, r) => s + (num(r.captured) || 0), 0)
   const sum = (k) => matRows.reduce((s, r) => s + (r[k] || 0), 0)
   const matTotal = {
     route: 'TOTAL', od: '',
     seater: sum('seater'), sleeper: sum('sleeper'), hybrid: sum('hybrid'),
     busesDay: nDays ? Math.round(totalTrips / nDays) : 0,
-    totalTrips, isTotal: true
+    totalTrips, captured: totalCaptured,
+    coveragePct: totalTrips ? Math.round(100 * totalCaptured / totalTrips) : null,
+    isTotal: true
   }
 
   return {
@@ -614,7 +693,8 @@ function buildRevenue(revMetrics, distribution, split, bestRoutes) {
       revPerSeaterKm: num(r.rev_per_seater_km),
       revPerSleeperKm: num(r.rev_per_sleeper_km),
       avgSeaterPrice: num(r.avg_seater_price),
-      avgSleeperPrice: num(r.avg_sleeper_price)
+      avgSleeperPrice: num(r.avg_sleeper_price),
+      coveragePct: num(r.coverage_pct)   // captured ÷ scheduled for this route
     }))
   }
 }
