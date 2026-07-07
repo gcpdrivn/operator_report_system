@@ -8,7 +8,8 @@
 // reproduce the FRESHBUS 10–14 Jun report exactly):
 //   - per-day = period total / COUNT(DISTINCT travel_date)
 //   - occupancy = AVG(occupancy_pct)
-//   - Overall ASP = AVG(price_inr>0); Seater/Sleeper ASP = AVG(avg_seater_price>0 / avg_sleeper_price>0)
+//   - Seater/Sleeper ASP = AVG of per-trip booked ratios (rev/booked seats), NULL when
+//     that class booked 0 seats; Overall ASP = those two ASPs weighted by booked seats
 //   - seater/sleeper revenue split exact from booked_*_revenue
 //   - trip/bus counts rounded to whole numbers
 //   - bus_class: seater-only / sleeper-only / both = hybrid
@@ -71,6 +72,18 @@ const SLOT_CASE = `CASE
   WHEN dep_hour>=8 AND dep_hour<14 THEN 'morning'
   WHEN dep_hour>=14 AND dep_hour<20 THEN 'afternoon'
   WHEN dep_hour>=20 AND dep_hour<24 THEN 'evening' END`
+
+// ---- ASP formulas (shared by the operator AND route reports) ----
+// Seater / Sleeper ASP = MEAN of per-trip booked ratios (booked_class_revenue ÷
+// booked_class_seats). SAFE_DIVIDE → NULL when a trip booked no seats of that class,
+// so AVG skips it (a class-less trip is NOT counted as ₹0). Overall ASP = the two
+// class ASPs weighted by booked seats. Each fragment is an AGGREGATE expression, so it
+// must sit inside a GROUP BY (or whole-scope) aggregate SELECT over the BASE rows.
+const SEATER_ASP  = `AVG(SAFE_DIVIDE(booked_seater_revenue, seater_booked))`
+const SLEEPER_ASP = `AVG(SAFE_DIVIDE(booked_sleeper_revenue, sleeper_booked))`
+const OVERALL_ASP = `SAFE_DIVIDE(
+    COALESCE(${SEATER_ASP},0)*SUM(seater_booked) + COALESCE(${SLEEPER_ASP},0)*SUM(sleeper_booked),
+    NULLIF(SUM(seater_booked)+SUM(sleeper_booked),0))`
 
 // Static descriptions for the fleet composition table (per class).
 const CLASS_LABEL = { seater: 'Seater', sleeper: 'Sleeper', hybrid: 'Hybrid' }
@@ -162,7 +175,7 @@ export async function getReport({ operator, from, to, busClass }) {
       SELECT COUNT(DISTINCT travel_date) AS n_days,
         ROUND(AVG(occupancy_pct),1) AS avg_occ,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
-        ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS overall_asp,
+        ROUND(${OVERALL_ASP}) AS overall_asp,
         (SELECT COUNT(*) FROM ${CAT} WHERE ${OP}) AS trip_count,
         COUNT(*) AS captured_count
       FROM t WHERE ${OP}`,
@@ -198,9 +211,9 @@ export async function getReport({ operator, from, to, busClass }) {
 
     revMetrics: `WITH t AS (${BASE})
       SELECT ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
-        ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS overall_asp,
-        ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS seater_asp,
-        ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS sleeper_asp
+        ROUND(${OVERALL_ASP}) AS overall_asp,
+        ROUND(${SEATER_ASP}) AS seater_asp,
+        ROUND(${SLEEPER_ASP}) AS sleeper_asp
       FROM t WHERE ${OP}`,
 
     distribution: `WITH t AS (${BASE}), ${ndCTE},
@@ -229,8 +242,8 @@ export async function getReport({ operator, from, to, busClass }) {
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr), SUM(distance_km*total_seats)),2) AS rev_per_seat_km,
         ROUND(SAFE_DIVIDE(SUM(booked_seater_revenue), SUM(distance_km*(IFNULL(seater_booked,0)+IFNULL(seater_available,0)))),2) AS rev_per_seater_km,
         ROUND(SAFE_DIVIDE(SUM(booked_sleeper_revenue), SUM(distance_km*(IFNULL(sleeper_booked,0)+IFNULL(sleeper_available,0)))),2) AS rev_per_sleeper_km,
-        ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS avg_seater_price,
-        ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS avg_sleeper_price,
+        ROUND(${SEATER_ASP}) AS avg_seater_price,
+        ROUND(${SLEEPER_ASP}) AS avg_sleeper_price,
         ROUND(AVG(occupancy_pct),1) AS occ_pct
         FROM t WHERE ${OP} GROUP BY route)
       SELECT api.route, api.distance_km, api.revenue_per_trip, api.revenue_per_km,
@@ -258,12 +271,12 @@ export async function getReport({ operator, from, to, busClass }) {
 
     overall: `WITH t AS (${BASE}), ${opRoutesCTE},
       op AS (SELECT 'operator' AS side, AVG(occupancy_pct) AS occ,
-        AVG(IF(avg_seater_price>0,avg_seater_price,NULL)) AS sa,
-        AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL)) AS sl
+        ${SEATER_ASP} AS sa,
+        ${SLEEPER_ASP} AS sl
         FROM t WHERE ${OP}),
       mkt AS (SELECT 'market' AS side, AVG(occupancy_pct) AS occ,
-        AVG(IF(avg_seater_price>0,avg_seater_price,NULL)) AS sa,
-        AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL)) AS sl
+        ${SEATER_ASP} AS sa,
+        ${SLEEPER_ASP} AS sl
         FROM t WHERE canon_operator != @operator AND ${RANGE} AND route IN (SELECT route FROM op_routes))
       SELECT side, ROUND(occ,1) AS occ_pct, ROUND(sa) AS seater_asp, ROUND(sl) AS sleeper_asp FROM op
       UNION ALL
@@ -282,9 +295,9 @@ export async function getReport({ operator, from, to, busClass }) {
       FROM u GROUP BY side`,
 
     byRoute: `WITH t AS (${BASE}), ${opRoutesCTE},
-      op AS (SELECT route, AVG(occupancy_pct) AS occ, AVG(IF(price_inr>0,price_inr,NULL)) AS asp
+      op AS (SELECT route, AVG(occupancy_pct) AS occ, ${OVERALL_ASP} AS asp
         FROM t WHERE ${OP} GROUP BY route),
-      mkt AS (SELECT route, AVG(occupancy_pct) AS occ, AVG(IF(price_inr>0,price_inr,NULL)) AS asp,
+      mkt AS (SELECT route, AVG(occupancy_pct) AS occ, ${OVERALL_ASP} AS asp,
         APPROX_QUANTILES(occupancy_pct,100)[OFFSET(50)] AS p50,
         APPROX_QUANTILES(occupancy_pct,100)[OFFSET(75)] AS p75,
         APPROX_QUANTILES(occupancy_pct,100)[OFFSET(90)] AS p90
@@ -303,8 +316,8 @@ export async function getReport({ operator, from, to, busClass }) {
         GROUP BY route, canon_operator),
       api AS (SELECT route, canon_operator AS operator,
         AVG(occupancy_pct) AS occ,
-        AVG(IF(avg_seater_price>0,avg_seater_price,NULL)) AS sa,
-        AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL)) AS sl
+        ${SEATER_ASP} AS sa,
+        ${SLEEPER_ASP} AS sl
         FROM t WHERE ${RANGE} AND route IN (SELECT route FROM op_routes)
         GROUP BY route, canon_operator),
       j AS (SELECT COALESCE(cat.route, api.route) AS route, COALESCE(cat.operator, api.operator) AS operator,
@@ -322,7 +335,7 @@ export async function getReport({ operator, from, to, busClass }) {
       SELECT route, canon_operator AS operator, COUNT(*) AS trips,
         ANY_VALUE(distance_km) AS distance_km,
         ROUND(AVG(occupancy_pct),1) AS occ,
-        ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS asp,
+        ROUND(${OVERALL_ASP}) AS asp,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0)) AS r_trip
       FROM t WHERE ${RANGE} AND route IN (SELECT route FROM op_routes)
       GROUP BY route, canon_operator`,
@@ -423,7 +436,7 @@ export async function getRouteReport({ route, from, to, operator, busClass }) {
         COUNT(DISTINCT unique_bus_id) AS unique_buses,
         ROUND(AVG(occupancy_pct),1) AS avg_occ,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
-        ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS overall_asp,
+        ROUND(${OVERALL_ASP}) AS overall_asp,
         ROUND(AVG(duration_hrs),2) AS avg_dur,
         CAST(ROUND(ANY_VALUE(distance_km)) AS INT64) AS km,
         ROUND(100*COUNTIF(is_ev=TRUE)/NULLIF(COUNT(*),0),1) AS ev_pct
@@ -431,9 +444,9 @@ export async function getRouteReport({ route, from, to, operator, busClass }) {
 
     revMetrics: `WITH t AS (${BASE})
       SELECT ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(DISTINCT travel_date),0)) AS rev_per_day,
-        ROUND(AVG(IF(price_inr>0,price_inr,NULL))) AS overall_asp,
-        ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS seater_asp,
-        ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS sleeper_asp
+        ROUND(${OVERALL_ASP}) AS overall_asp,
+        ROUND(${SEATER_ASP}) AS seater_asp,
+        ROUND(${SLEEPER_ASP}) AS sleeper_asp
       FROM t WHERE ${RSCOPE}`,
 
     unit: `WITH t AS (${BASE})
@@ -475,8 +488,8 @@ export async function getRouteReport({ route, from, to, operator, busClass }) {
       tot AS (SELECT SUM(booked_revenue_inr) AS total_rev FROM t WHERE ${MSCOPE}),
       cat AS (SELECT canon_operator AS operator, COUNT(*) AS trips FROM ${CAT} WHERE ${MSCOPE} GROUP BY canon_operator),
       per_op AS (SELECT canon_operator AS operator, COUNT(*) AS captured, AVG(occupancy_pct) AS occ,
-        AVG(IF(avg_seater_price>0,avg_seater_price,NULL)) AS sa,
-        AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL)) AS sl,
+        ${SEATER_ASP} AS sa,
+        ${SLEEPER_ASP} AS sl,
         SUM(booked_revenue_inr) AS period_rev,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0), NULLIF(ANY_VALUE(distance_km),0))) AS rev_per_km,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr), SUM(distance_km*total_seats)),2) AS rev_per_seat_km,
@@ -499,8 +512,8 @@ export async function getRouteReport({ route, from, to, operator, busClass }) {
       SELECT IF(is_ev=TRUE,'EV','ICE') AS fuel, COUNT(*) AS cnt,
         COUNT(*)/NULLIF((SELECT n FROM nd),0) AS trips_per_day,
         ROUND(AVG(occupancy_pct),1) AS occ_pct,
-        ROUND(AVG(IF(avg_seater_price>0,avg_seater_price,NULL))) AS seater_asp,
-        ROUND(AVG(IF(avg_sleeper_price>0,avg_sleeper_price,NULL))) AS sleeper_asp,
+        ROUND(${SEATER_ASP}) AS seater_asp,
+        ROUND(${SLEEPER_ASP}) AS sleeper_asp,
         ROUND(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0)) AS revenue_per_trip,
         ROUND(SAFE_DIVIDE(SUM(booked_revenue_inr)/NULLIF(COUNT(*),0), NULLIF(ANY_VALUE(distance_km),0))) AS rev_per_km,
         ROUND(SAFE_DIVIDE(SUM(booked_seater_revenue), SUM(distance_km*(IFNULL(seater_booked,0)+IFNULL(seater_available,0)))),2) AS rev_per_seater_km,
