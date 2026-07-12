@@ -8,7 +8,7 @@ import { schemaFor } from './report/schemas.js'
 import { exportPdf } from './report/export/exportPdf.js'
 import { exportXlsx } from './report/export/exportXlsx.js'
 
-export default function App() {
+export default function App({ user, logout }) {
   useEffect(() => { applyTheme(getInitialTheme()) }, [])
 
   const { meta, loading: metaLoading, error: metaError } = useReportMeta()
@@ -87,6 +87,8 @@ export default function App() {
           <ActionBtn onClick={handlePdf} disabled={!ready} primary>↧ PDF</ActionBtn>
           <ActionBtn onClick={refresh} disabled={loading || !config} title="Refresh from BigQuery">{loading ? '…' : '↻'}</ActionBtn>
           <ThemeToggle />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.email}>{user?.name || user?.email}</span>
+          <button onClick={logout} title="Sign out" style={{ padding: '5px 12px', fontSize: 13, fontWeight: 600, borderRadius: 5, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Sign out</button>
         </div>
       </header>
 
