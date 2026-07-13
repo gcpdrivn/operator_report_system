@@ -13,13 +13,13 @@
 #   gcloud run services describe drivn-server --region <region> --format 'value(status.url)'
 [[redirects]]
   from = "/api/*"
-  to = "https://drivn-server-REPLACE.a.run.app/api/:splat"
+  to = "https://drivn-server-xcmhxzbnrq-uc.a.run.app/api/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/auth/*"
-  to = "https://drivn-server-REPLACE.a.run.app/auth/:splat"
+  to = "https://drivn-server-xcmhxzbnrq-uc.a.run.app/auth/:splat"
   status = 200
   force = true
 
