@@ -83,7 +83,7 @@ function AuthScreen({ appName, initialTicket, onAuthed }) {
           <Field label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           <button style={C.btn} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-          <button type="button" style={C.link} onClick={() => { setErr(null); setNotice(null); setMode('forgot') }}>Forgot password?</button>
+          {/* "Forgot password?" hidden until email delivery is configured — admins reset passwords from the admin panel. */}
         </>}
 
         {mode === 'setpw' && <>

@@ -13,3 +13,8 @@ dist/
 # editor / OS
 .DS_Store
 .claude/
+*-service-account.json
+bq-*.json
+.auth-users*.json
+dist
+.env.*

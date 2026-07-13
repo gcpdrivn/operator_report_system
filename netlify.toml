@@ -5,14 +5,21 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# The dashboard and the reporting frontends now share ONE backend: the central
-# drivn-server. Proxy /api/* to it so the browser only ever calls same-origin
-# /api/* (no CORS, and the backend URL stays out of the bundle).
-# TODO: after deploying drivn-server to Cloud Run, replace the host below:
+# All frontends share ONE backend: the central drivn-server (Cloud Run). Proxy
+# /api/* AND /auth/* to it so the browser only ever calls same-origin (no CORS,
+# and the session cookie is set on THIS site's origin). Both MUST precede the SPA
+# fallback below.
+# TODO: after deploying drivn-server to Cloud Run, replace the host in BOTH rules:
 #   gcloud run services describe drivn-server --region <region> --format 'value(status.url)'
 [[redirects]]
   from = "/api/*"
   to = "https://drivn-server-REPLACE.a.run.app/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/auth/*"
+  to = "https://drivn-server-REPLACE.a.run.app/auth/:splat"
   status = 200
   force = true
 
