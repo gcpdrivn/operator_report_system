@@ -32,6 +32,8 @@ export default function App({ user, logout }) {
     if (route && meta.routes?.some(r => r.route === route)) base.route = route
     const bc = p.get('busClass')
     if (['seater', 'sleeper', 'hybrid'].includes(bc)) base.busClass = bc
+    const acp = p.get('acClass')
+    if (['AC', 'Non-AC', 'Unclassified'].includes(acp)) base.acClass = acp
     if (from && dates.includes(from)) base.from = from
     if (to && dates.includes(to)) base.to = to
     setConfig(base)
@@ -39,7 +41,7 @@ export default function App({ user, logout }) {
 
   const { data, loading, error, fromCache, refresh } = useReportData({
     type: config?.reportType, operator: config?.operator, route: config?.route,
-    routeOperator: config?.routeOperator, busClass: config?.busClass,
+    routeOperator: config?.routeOperator, busClass: config?.busClass, acClass: config?.acClass,
     from: config?.from, to: config?.to,
   })
 
@@ -64,7 +66,8 @@ export default function App({ user, logout }) {
     ? `${config?.route}${config?.routeOperator ? ` - ${config.routeOperator}` : ''}`
     : config?.operator
   const classTag = config?.busClass ? `_${config.busClass}` : ''
-  const fnameBase = `${config?.reportType === 'route' ? 'Route' : 'Operator'}_Report_${subject}${classTag}_${config?.from}_${config?.to}`
+  const acTag = config?.acClass ? `_${config.acClass}` : ''
+  const fnameBase = `${config?.reportType === 'route' ? 'Route' : 'Operator'}_Report_${subject}${classTag}${acTag}_${config?.from}_${config?.to}`
     .replace(/[\\/:*?"<>|]/g, '-')
   const handlePdf = () => exportPdf(fnameBase)
   const handleXlsx = () => { if (ready) exportXlsx(config, data, schema) }

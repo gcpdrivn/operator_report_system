@@ -36,6 +36,7 @@ export function buildDefaultConfig(meta) {
     route,
     routeOperator: '',                // route reports: optional operator filter ('' = whole-route market)
     busClass: '',                     // both types: optional bus-class filter ('' = all | seater | sleeper | hybrid)
+    acClass: '',                      // both types: optional AC filter ('' = all | AC | Non-AC | Unclassified)
     from: win.start || '',
     to: win.end || '',
     competitiveRoutes: [],            // auto-filled from the report's in-range routes once data loads

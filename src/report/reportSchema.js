@@ -99,6 +99,24 @@ export const REPORT_SCHEMA = [
     ],
   },
   {
+    id: 'acBreakdown', title: '3b. AC / Non-AC Breakdown by Bus Type',
+    scope: '{operator} only. Bus types grouped by AC vs Non-AC. Seater / Sleeper ASP = mean of per-trip price (₹ per booked seat); Rev / Seater-km & Rev / Sleeper-km = class revenue ÷ Σ(distance × class seats). The “… — all types” row is the class-level figure (computed at the class grain, not a sum of the rows above).',
+    tables: [
+      {
+        id: 'byType', title: 'ASP & Yield by AC / Non-AC and Bus Type', kind: 'grid', field: 'acBreakdown',
+        columns: [
+          { key: 'acClass', label: 'AC Class', format: 'text', align: 'left', bold: true },
+          { key: 'busType', label: 'Bus Type', format: 'text', align: 'left' },
+          { key: 'trips', label: 'Trips (captured)', format: 'int', align: 'right' },
+          { key: 'seaterAsp', label: 'Seater ASP', format: 'rupee', align: 'right' },
+          { key: 'sleeperAsp', label: 'Sleeper ASP', format: 'rupee', align: 'right' },
+          { key: 'revPerSeaterKm', label: 'Rev / Seater / Km', format: 'rupee2', align: 'right' },
+          { key: 'revPerSleeperKm', label: 'Rev / Sleeper / Km', format: 'rupee2', align: 'right' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'occupancy', title: '4. Occupancy Analysis',
     scope: '{operator} only. Occupancy from CAPTURED trips; Trips/Day are SCHEDULED departures.',
     tables: [

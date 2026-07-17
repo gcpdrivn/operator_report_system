@@ -106,6 +106,15 @@ export default function ControlsPanel({ meta, config, setConfig, data, schema })
         </div>
       )}
 
+      <div style={sectionLabel.groupTitle}>AC / Non-AC</div>
+      <Segmented value={config.acClass || ''} onChange={v => setField('acClass', v)}
+        options={[{ v: '', l: 'All' }, { v: 'AC', l: 'AC' }, { v: 'Non-AC', l: 'Non-AC' }, { v: 'Unclassified', l: 'Other' }]} />
+      {config.acClass && (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.45 }}>
+          Every figure covers <strong>{config.acClass}</strong> buses only, including the market comparison.
+        </div>
+      )}
+
       {!isRoute && competitiveOn && (
         <>
           <div style={sectionLabel.groupTitle}>Competitive Routes (top-operator tables)</div>

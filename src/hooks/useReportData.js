@@ -31,7 +31,7 @@ export function useReportMeta() {
 
 // Report payload for the selected subject (operator or route) + date range.
 // Re-fetches when type/operator/route/dates change (toggles are client-side).
-export function useReportData({ type = 'operator', operator, route, routeOperator, busClass, from, to }) {
+export function useReportData({ type = 'operator', operator, route, routeOperator, busClass, acClass, from, to }) {
   const [state, setState] = useState({ data: null, loading: false, error: null, fromCache: false, lastUpdated: null })
   const inFlight = useRef(false)
 
@@ -49,6 +49,7 @@ export function useReportData({ type = 'operator', operator, route, routeOperato
         if (routeOperator) qs.set('operator', routeOperator)   // optional operator filter
       } else { qs.set('operator', operator) }
       if (busClass) qs.set('busClass', busClass)               // optional bus-class filter (both types)
+      if (acClass) qs.set('acClass', acClass)                  // optional AC / Non-AC filter (both types)
       if (force) qs.set('refresh', '1')
       const res = await fetch(`${API_BASE}/api/report?${qs.toString()}`)
       if (!res.ok) {
@@ -68,7 +69,7 @@ export function useReportData({ type = 'operator', operator, route, routeOperato
     } finally {
       inFlight.current = false
     }
-  }, [type, operator, route, routeOperator, busClass, from, to, subject])
+  }, [type, operator, route, routeOperator, busClass, acClass, from, to, subject])
 
   useEffect(() => { load() }, [load])
 
